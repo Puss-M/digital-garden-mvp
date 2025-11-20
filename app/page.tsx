@@ -1,119 +1,199 @@
-import React from "react";
+'use client';
+
+import { useState, useEffect } from 'react';
+import { supabase } from '../utils/supabase';
+import Link from 'next/link';
+
+interface Idea {
+  id: number;
+  content: string;
+  created_at: string;
+  author?: string;
+}
 
 export default function Home() {
-  return (
-    <div className="flex h-screen bg-gray-50 text-gray-900 font-sans overflow-hidden">
-      {/* Sidebar */}
-      <aside className="w-64 bg-gray-900 text-white flex flex-col p-6 space-y-8 shadow-xl z-10">
-        <div className="flex items-center space-x-3">
-          <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center">
-            <span className="text-gray-900 font-bold text-lg">D</span>
-          </div>
-          <h1 className="text-xl font-bold tracking-tight">Digital Garden</h1>
-        </div>
+  const [ideas, setIdeas] = useState<Idea[]>([]);
+  const [inputValue, setInputValue] = useState('');
+  const [authorName, setAuthorName] = useState('匿名同学');
+  const [isLoading, setIsLoading] = useState(true);
 
-        <nav className="flex flex-col space-y-2 flex-1">
-          <button className="flex items-center space-x-3 px-4 py-3 rounded-xl bg-gray-800 text-white shadow-sm transition-all hover:bg-gray-700 hover:shadow-md">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-              strokeWidth={1.5}
-              stroke="currentColor"
-              className="w-5 h-5"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M12 18v-5.25m0 0a6.01 6.01 0 0 0 1.5-4.5m-1.5 4.5a6.01 6.01 0 0 1-1.5-4.5m0 0A6.01 6.01 0 0 1 12 2.75a6.01 6.01 0 0 1 1.5 4.5m0 0v-4.5m0 0h.008v.008h-.008v-.008Zm0 0h.008v.008h-.008v-.008Zm-3 6h.008v.008h-.008v-.008Zm0 0h.008v.008h-.008v-.008Zm-3 6h.008v.008h-.008v-.008Zm0 0h.008v.008h-.008v-.008Zm-3 6h.008v.008h-.008v-.008Zm0 0h.008v.008h-.008v-.008Z"
-              />
-            </svg>
-            <span className="font-medium">我的想法</span>
-          </button>
-          <button className="flex items-center space-x-3 px-4 py-3 rounded-xl text-gray-400 hover:bg-gray-800 hover:text-white transition-all">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-              strokeWidth={1.5}
-              stroke="currentColor"
-              className="w-5 h-5"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M7.217 10.907a2.25 2.25 0 1 0 0 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186 9.566-5.314m-9.566 7.5 9.566 5.314m0 0a2.25 2.25 0 1 0 3.935 2.186 2.25 2.25 0 0 0-3.935-2.186Zm0-12.814a2.25 2.25 0 1 0 3.933-2.185 2.25 2.25 0 0 0-3.933 2.185Z"
-              />
-            </svg>
-            <span className="font-medium">知识图谱</span>
-          </button>
+  // Fetch ideas on component mount
+  useEffect(() => {
+    fetchIdeas();
+  }, []);
+
+  const fetchIdeas = async (showLoading = true) => {
+    try {
+      if (showLoading) setIsLoading(true);
+      const { data, error } = await supabase
+        .from('ideas')
+        .select('*')
+        .order('created_at', { ascending: true });
+
+      if (error) {
+        console.error('Error fetching ideas:', error);
+      } else {
+        setIdeas(data || []);
+      }
+    } catch (error) {
+      console.error('Unexpected error:', error);
+    } finally {
+      if (showLoading) setIsLoading(false);
+    }
+  };
+
+  const handleSend = async () => {
+    const content = inputValue.trim();
+    if (!content) return;
+
+    // 1. Optimistic Update
+    const tempId = Date.now();
+    const tempIdea: Idea = {
+      id: tempId,
+      content: content,
+      created_at: new Date().toISOString(),
+      author: authorName,
+    };
+
+    setIdeas((prev) => [...prev, tempIdea]);
+    setInputValue('');
+
+    try {
+      // 2. Background Processing
+      // Generate embedding
+      const embeddingResponse = await fetch('/api/embed', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ text: content }),
+      });
+
+      if (!embeddingResponse.ok) {
+        throw new Error('Failed to generate embedding');
+      }
+
+      const { embedding } = await embeddingResponse.json();
+
+      // Save to Supabase with embedding and author
+      const { error } = await supabase
+        .from('ideas')
+        .insert({ 
+          content: content,
+          embedding: embedding,
+          author: authorName
+        });
+
+      if (error) throw error;
+
+      // Success: Refresh list silently to get real ID
+      fetchIdeas(false);
+    } catch (error) {
+      console.error('Error in background process:', error);
+      // 3. Error Rollback
+      setIdeas((prev) => prev.filter((idea) => idea.id !== tempId));
+      alert('发送失败，请重试');
+      setInputValue(content); // Restore input
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      handleSend();
+    }
+  };
+
+  return (
+    <div className="flex h-screen bg-gray-50 font-sans text-gray-900">
+      {/* Sidebar */}
+      <aside className="w-64 bg-gray-900 text-white flex flex-col p-6 shadow-lg">
+        <h1 className="text-2xl font-bold tracking-tight mb-10">Digital Garden</h1>
+        
+        <nav className="flex-1 space-y-4">
+          <Link href="/">
+            <button className="w-full text-left px-4 py-3 rounded-lg bg-gray-800 hover:bg-gray-700 transition-colors duration-200 font-medium">
+              My Ideas
+            </button>
+          </Link>
+          <Link href="/graph">
+            <button className="w-full text-left px-4 py-3 rounded-lg hover:bg-gray-800 transition-colors duration-200 font-medium text-gray-400">
+              Knowledge Graph
+            </button>
+          </Link>
         </nav>
 
-        <div className="pt-6 border-t border-gray-800">
-          <div className="flex items-center space-x-3">
-            <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-blue-500 to-purple-500"></div>
-            <div className="text-sm text-gray-400">User Profile</div>
+        <div className="mt-auto pt-6 border-t border-gray-800">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-green-400 to-blue-500"></div>
+            <span className="font-medium">{authorName || 'User'}</span>
           </div>
         </div>
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 flex flex-col relative min-w-0">
-        {/* Display Area */}
-        <div className="flex-1 flex flex-col items-center justify-center p-8 overflow-y-auto">
-          <div className="w-full max-w-5xl h-full border border-gray-200 bg-white rounded-3xl shadow-sm flex flex-col items-center justify-center relative overflow-hidden">
-            <div className="absolute inset-0 opacity-5 bg-[radial-gradient(#000_1px,transparent_1px)] [background-size:16px_16px]"></div>
-            <div className="text-center z-10 p-8">
-              <div className="w-16 h-16 bg-gray-100 rounded-2xl flex items-center justify-center mx-auto mb-4 text-gray-400">
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  strokeWidth={1.5}
-                  stroke="currentColor"
-                  className="w-8 h-8"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15"
-                  />
-                </svg>
-              </div>
-              <h2 className="text-xl font-semibold text-gray-500">
+      <main className="flex-1 flex flex-col relative">
+        {/* Chat/Content Area */}
+        <div className="flex-1 overflow-y-auto p-8 pb-32">
+          <div className="max-w-3xl mx-auto space-y-6">
+            {isLoading ? (
+              <div className="text-center text-gray-500 mt-20">Loading...</div>
+            ) : ideas.length === 0 ? (
+              <div className="text-center text-gray-400 mt-20 text-lg">
                 这里将显示你的知识图谱
-              </h2>
-              <p className="text-gray-400 mt-2 text-sm">
-                Start by adding your first idea below
-              </p>
-            </div>
+              </div>
+            ) : (
+              ideas.map((idea) => (
+                <div 
+                  key={idea.id} 
+                  className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 hover:shadow-md transition-shadow duration-200"
+                >
+                  <div className="flex items-center gap-2 mb-2 text-xs text-gray-400">
+                    <span className="font-medium text-gray-600">
+                      {idea.author || '匿名同学'}
+                    </span>
+                    <span>·</span>
+                    <span>
+                      {new Date(idea.created_at).toLocaleString()}
+                    </span>
+                  </div>
+                  <p className="text-gray-800 leading-relaxed">{idea.content}</p>
+                </div>
+              ))
+            )}
           </div>
         </div>
 
         {/* Input Area */}
-        <div className="p-6 bg-white/80 backdrop-blur-md border-t border-gray-100">
-          <div className="max-w-3xl mx-auto relative">
-            <div className="relative group">
+        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-gray-50 via-gray-50 to-transparent pt-10 pb-8 px-8">
+          <div className="max-w-3xl mx-auto relative flex gap-3">
+            {/* Author Input */}
+            <div className="w-32 flex-shrink-0">
               <input
                 type="text"
-                placeholder="输入你的想法..."
-                className="w-full pl-6 pr-16 py-4 bg-gray-50 border border-gray-200 focus:bg-white focus:border-gray-300 focus:ring-4 focus:ring-gray-100 rounded-2xl shadow-sm text-lg placeholder-gray-400 transition-all outline-none"
+                value={authorName}
+                onChange={(e) => setAuthorName(e.target.value)}
+                placeholder="你的名字"
+                className="w-full px-4 py-4 bg-white border border-gray-200 rounded-full shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all duration-300 text-sm text-center font-medium text-gray-600 placeholder-gray-400"
               />
-              <button className="absolute right-2 top-1/2 -translate-y-1/2 p-2.5 bg-gray-900 text-white rounded-xl hover:bg-black hover:scale-105 active:scale-95 transition-all shadow-md disabled:opacity-50 disabled:cursor-not-allowed">
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 24 24"
-                  fill="currentColor"
-                  className="w-5 h-5"
-                >
-                  <path d="M3.478 2.404a.75.75 0 0 0-.926.941l2.432 7.905H13.5a.75.75 0 0 1 0 1.5H4.984l-2.432 7.905a.75.75 0 0 0 .926.94 60.519 60.519 0 0 0 18.445-8.986.75.75 0 0 0 0-1.218A60.517 60.517 0 0 0 3.478 2.404Z" />
-                </svg>
-              </button>
             </div>
-            <div className="text-center mt-3">
-              <span className="text-xs font-medium text-gray-400 bg-gray-100 px-2 py-1 rounded-md">
-                MVP v0.1
-              </span>
+
+            {/* Message Input */}
+            <div className="flex-1 relative">
+              <input
+                type="text"
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Type your idea..."
+                className="w-full pl-6 pr-32 py-4 bg-white border border-gray-200 rounded-full shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all duration-300 text-lg placeholder-gray-400"
+              />
+              <button 
+                onClick={handleSend}
+                disabled={!inputValue.trim()}
+                className="absolute right-2 top-2 bottom-2 px-6 bg-gray-900 text-white rounded-full font-medium hover:bg-black disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
+              >
+                Send
+              </button>
             </div>
           </div>
         </div>
