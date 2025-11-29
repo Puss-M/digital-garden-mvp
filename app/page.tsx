@@ -1,203 +1,32 @@
-'use client';
+'use client'
 
-import { useState, useEffect } from 'react';
-import { supabase } from '../utils/supabase';
-import Link from 'next/link';
+import dynamic from 'next/dynamic'
 
-interface Idea {
-  id: number;
-  content: string;
-  created_at: string;
-  author?: string;
-}
+const PrototypeDemo = dynamic(() => import('./components/PrototypeDemo').then(mod => mod.PrototypeDemo), { 
+  ssr: false,
+  loading: () => <div className="p-8 text-center text-slate-500">Loading Prototype...</div>
+})
 
 export default function Home() {
-  const [ideas, setIdeas] = useState<Idea[]>([]);
-  const [inputValue, setInputValue] = useState('');
-  const [authorName, setAuthorName] = useState('匿名同学');
-  const [isLoading, setIsLoading] = useState(true);
-
-  // Fetch ideas on component mount
-  useEffect(() => {
-    fetchIdeas();
-  }, []);
-
-  const fetchIdeas = async (showLoading = true) => {
-    try {
-      if (showLoading) setIsLoading(true);
-      const { data, error } = await supabase
-        .from('ideas')
-        .select('*')
-        .order('created_at', { ascending: true });
-
-      if (error) {
-        console.error('Error fetching ideas:', error);
-      } else {
-        setIdeas(data || []);
-      }
-    } catch (error) {
-      console.error('Unexpected error:', error);
-    } finally {
-      if (showLoading) setIsLoading(false);
-    }
-  };
-
-  const handleSend = async () => {
-    const content = inputValue.trim();
-    if (!content) return;
-
-    // 1. Optimistic Update
-    const tempId = Date.now();
-    const tempIdea: Idea = {
-      id: tempId,
-      content: content,
-      created_at: new Date().toISOString(),
-      author: authorName,
-    };
-
-    setIdeas((prev) => [...prev, tempIdea]);
-    setInputValue('');
-
-    try {
-      // 2. Background Processing
-      // Generate embedding
-      const embeddingResponse = await fetch('/api/embed', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ text: content }),
-      });
-
-      if (!embeddingResponse.ok) {
-        throw new Error('Failed to generate embedding');
-      }
-
-      const { embedding } = await embeddingResponse.json();
-
-      // Save to Supabase with embedding and author
-      const { error } = await supabase
-        .from('ideas')
-        .insert({ 
-          content: content,
-          embedding: embedding,
-          author: authorName
-        });
-
-      if (error) throw error;
-
-      // Success: Refresh list silently to get real ID
-      fetchIdeas(false);
-    } catch (error) {
-      console.error('Error in background process:', error);
-      // 3. Error Rollback
-      setIdeas((prev) => prev.filter((idea) => idea.id !== tempId));
-      alert('发送失败，请重试');
-      setInputValue(content); // Restore input
-    }
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      handleSend();
-    }
-  };
-
   return (
-    <div className="flex h-screen bg-gray-50 font-sans text-gray-900">
-      {/* Sidebar */}
-      <aside className="w-64 bg-gray-900 text-white flex flex-col p-6 shadow-lg">
-        <h1 className="text-2xl font-bold tracking-tight mb-10">Digital Garden</h1>
-        
-        <nav className="flex-1 space-y-4">
-          <Link href="/">
-            <button className="w-full text-left px-4 py-3 rounded-lg bg-gray-800 hover:bg-gray-700 transition-colors duration-200 font-medium">
-              My Ideas
-            </button>
-          </Link>
-          <Link href="/graph">
-            <button className="w-full text-left px-4 py-3 rounded-lg hover:bg-gray-800 transition-colors duration-200 font-medium text-gray-400">
-              Knowledge Graph
-            </button>
-          </Link>
-        </nav>
-
-        <div className="mt-auto pt-6 border-t border-gray-800">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-green-400 to-blue-500"></div>
-            <span className="font-medium">{authorName || 'User'}</span>
-          </div>
-        </div>
-      </aside>
-
-      {/* Main Content */}
-      <main className="flex-1 flex flex-col relative">
-        {/* Chat/Content Area */}
-        <div className="flex-1 overflow-y-auto p-8 pb-32">
-          <div className="max-w-3xl mx-auto space-y-6">
-            {isLoading ? (
-              <div className="text-center text-gray-500 mt-20">Loading...</div>
-            ) : ideas.length === 0 ? (
-              <div className="text-center text-gray-400 mt-20 text-lg">
-                这里将显示你的知识图谱
+    <main className="min-h-screen bg-[#0f172a] text-slate-200 selection:bg-emerald-500/30">
+      <nav className="sticky top-0 z-50 bg-[#0f172a]/80 backdrop-blur-md border-b border-slate-800">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center h-16">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-lg bg-emerald-500 flex items-center justify-center shadow-[0_0_15px_rgba(16,185,129,0.4)]">
+                <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.384-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+                </svg>
               </div>
-            ) : (
-              ideas.map((idea) => (
-                <div 
-                  key={idea.id} 
-                  className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 hover:shadow-md transition-shadow duration-200"
-                >
-                  <div className="flex items-center gap-2 mb-2 text-xs text-gray-400">
-                    <span className="font-medium text-gray-600">
-                      {idea.author || '匿名同学'}
-                    </span>
-                    <span>·</span>
-                    <span>
-                      {new Date(idea.created_at).toLocaleString()}
-                    </span>
-                  </div>
-                  <p className="text-gray-800 leading-relaxed">{idea.content}</p>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-
-        {/* Input Area */}
-        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-gray-50 via-gray-50 to-transparent pt-10 pb-8 px-8">
-          <div className="max-w-3xl mx-auto relative flex gap-3">
-            {/* Author Input */}
-            <div className="w-32 flex-shrink-0">
-              <input
-                type="text"
-                value={authorName}
-                onChange={(e) => setAuthorName(e.target.value)}
-                placeholder="你的名字"
-                className="w-full px-4 py-4 bg-white border border-gray-200 rounded-full shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all duration-300 text-sm text-center font-medium text-gray-600 placeholder-gray-400"
-              />
-            </div>
-
-            {/* Message Input */}
-            <div className="flex-1 relative">
-              <input
-                type="text"
-                value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="Type your idea..."
-                className="w-full pl-6 pr-32 py-4 bg-white border border-gray-200 rounded-full shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all duration-300 text-lg placeholder-gray-400"
-              />
-              <button 
-                onClick={handleSend}
-                disabled={!inputValue.trim()}
-                className="absolute right-2 top-2 bottom-2 px-6 bg-gray-900 text-white rounded-full font-medium hover:bg-black disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
-              >
-                Send
-              </button>
+              <span className="font-bold text-lg tracking-tight text-white">Digital<span className="text-emerald-400">Garden</span></span>
             </div>
           </div>
         </div>
-      </main>
-    </div>
-  );
+      </nav>
+      <div className="pt-6">
+        <PrototypeDemo />
+      </div>
+    </main>
+  )
 }

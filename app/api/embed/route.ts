@@ -3,7 +3,7 @@ import { pipeline } from '@xenova/transformers';
 
 // 这里的逻辑是单例模式，防止每次请求都重新加载模型（模型挺大的）
 class PipelineSingleton {
-    static task = 'feature-extraction';
+    static task = 'feature-extraction' as const;
     static model = 'Xenova/all-MiniLM-L6-v2';
     static instance: any = null;
 
