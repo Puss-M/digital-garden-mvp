@@ -11,19 +11,13 @@ export const PrototypeDemo: React.FC = () => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [matchAlert, setMatchAlert] = useState<SemanticMatch | null>(null);
   const [viewMode, setViewMode] = useState<'list' | 'graph'>('list');
-  
-  // ✨ 新增：用户名字状态
   const [userName, setUserName] = useState('研究员');
-  // 使用 Ref 来解决实时订阅中的闭包问题，确保能拿到最新的名字
   const userNameRef = useRef(userName);
 
-  useEffect(() => {
-    userNameRef.current = userName;
-  }, [userName]);
-
+  useEffect(() => { userNameRef.current = userName; }, [userName]);
   const notesEndRef = useRef<HTMLDivElement>(null);
 
-  // 1. 初始化
+  // 1. 初始化：拉取数据
   useEffect(() => {
     fetchRealNotes();
 
@@ -31,7 +25,7 @@ export const PrototypeDemo: React.FC = () => {
       .channel('realtime ideas')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'ideas' }, (payload) => {
         const newIdea = payload.new;
-        // 只有当作者名字不是当前用户时，才推送到列表（防止自己刚发的重复出现）
+        // 如果是别人发的，立刻显示出来
         if (newIdea.author !== userNameRef.current) {
             const note: Note = {
                 id: newIdea.id.toString(),
@@ -50,6 +44,7 @@ export const PrototypeDemo: React.FC = () => {
   }, []);
 
   const fetchRealNotes = async () => {
+    // 增加错误日志，方便排查
     const { data, error } = await supabase
       .from('ideas')
       .select('*')
@@ -57,7 +52,8 @@ export const PrototypeDemo: React.FC = () => {
       .limit(50);
 
     if (error) {
-        console.error('获取失败:', error);
+        console.error('🔥 致命错误：无法拉取数据！', error);
+        alert("无法连接数据库，请检查网络或联系管理员！错误信息：" + error.message);
         return;
     }
 
@@ -68,20 +64,21 @@ export const PrototypeDemo: React.FC = () => {
         content: idea.content,
         timestamp: new Date(idea.created_at).toLocaleString(),
         tags: ['数据库'],
-        isLocalUser: idea.author === userNameRef.current || idea.author === '我' // 兼容旧数据
+        isLocalUser: idea.author === userNameRef.current || idea.author === '我'
       }));
       setLocalNotes(formattedNotes);
     }
   };
 
+  // 🔴 核心修复：发送逻辑重写
   const handlePost = async () => {
     if (!inputText.trim()) return;
     if (!userName.trim()) { alert("请先填写您的名字"); return; }
 
     const content = inputText;
-    const currentAuthor = userName; // 锁定发送时的名字
+    const currentAuthor = userName;
     
-    // 乐观更新
+    // 1. 乐观更新（UI 先显示）
     const tempNote: Note = {
       id: Date.now().toString(),
       author: currentAuthor,
@@ -96,60 +93,66 @@ export const PrototypeDemo: React.FC = () => {
     setIsAnalyzing(true);
 
     try {
-        // 生成向量
-        const embedRes = await fetch('/api/embed', {
-            method: 'POST',
-            body: JSON.stringify({ text: content })
-        });
-        
-        if (!embedRes.ok) throw new Error("向量生成失败");
-        const { embedding } = await embedRes.json();
+        // 2. 🔥【关键修改】先存文字！先存文字！先存文字！
+        // 哪怕 embedding 是 null，先把话传出去，保证别人能看到。
+        const { data: insertedData, error: insertError } = await supabase
+            .from('ideas')
+            .insert({
+                content: content,
+                author: currentAuthor, 
+                embedding: null // 先留空，后面再补
+            })
+            .select()
+            .single();
 
-        // 存入 Supabase (✨ 这里现在存的是真实名字了！)
-        const { error } = await supabase.from('ideas').insert({
-            content: content,
-            author: currentAuthor, 
-            embedding: embedding
-        });
-
-        if (error) throw error;
-
-        // 触发碰撞检测
-        const { data: matches } = await supabase.rpc('match_ideas', {
-            query_embedding: embedding,
-            match_threshold: 0.1, 
-            match_count: 1,
-            current_author: currentAuthor // 排除自己
-        });
-
-        // 结果处理 + 演示兜底
-        if (matches && matches.length > 0) {
-            setMatchAlert({
-                found: true,
-                targetNoteId: matches[0].id.toString(),
-                reason: `语义相似度: ${(matches[0].similarity * 100).toFixed(0)}% - 建议建立跨学科连接`
-            });
-        } else {
-            const keywords = ['模型', 'transformer', '变压器', '基因', '羊驼', '学习', '数学'];
-            const hitKeyword = keywords.find(k => content.toLowerCase().includes(k));
-            // 找一个不是自己发的笔记作为目标
-            const targetNote = localNotes.find(n => n.author !== currentAuthor);
-
-            if (hitKeyword && targetNote) {
-                console.log("⚡️ 触发关键词强制匹配 (演示模式)");
-                setMatchAlert({
-                    found: true,
-                    targetNoteId: targetNote.id,
-                    reason: `系统识别到核心关键词 "${hitKeyword}" (自动关联)`
-                });
-            }
+        if (insertError) {
+            throw new Error("数据库写入失败: " + insertError.message);
         }
 
-    } catch (err) {
-        console.error("发送流程出错:", err);
+        console.log("✅ 文字已保存，ID:", insertedData.id);
+
+        // 3. 后台异步补全向量 (如果这步挂了，不影响文字显示)
+        try {
+            const embedRes = await fetch('/api/embed', {
+                method: 'POST',
+                body: JSON.stringify({ text: content })
+            });
+            
+            if (embedRes.ok) {
+                const { embedding } = await embedRes.json();
+                
+                // 补录向量
+                await supabase.from('ideas').update({ embedding }).eq('id', insertedData.id);
+                
+                // 触发碰撞检测
+                const { data: matches } = await supabase.rpc('match_ideas', {
+                    query_embedding: embedding,
+                    match_threshold: 0.1, 
+                    match_count: 1,
+                    current_author: currentAuthor
+                });
+
+                if (matches && matches.length > 0) {
+                    setMatchAlert({
+                        found: true,
+                        targetNoteId: matches[0].id.toString(),
+                        reason: `语义相似度: ${(matches[0].similarity * 100).toFixed(0)}%`
+                    });
+                }
+            } else {
+                console.warn("⚠️ AI服务繁忙，本条消息暂无向量数据");
+            }
+        } catch (aiError) {
+            console.error("AI生成失败，但这不影响消息发送:", aiError);
+        }
+
+    } catch (err: any) {
+        console.error("❌ 发送彻底失败:", err);
+        alert("发送失败！请截图发给管理员: " + err.message);
+        // 回滚：把刚才乐观更新的那条删掉 (简单处理：重新拉取列表)
+        fetchRealNotes();
     } finally {
         setIsAnalyzing(false);
-        fetchRealNotes(); 
     }
   };
 
@@ -194,10 +197,7 @@ export const PrototypeDemo: React.FC = () => {
         
         {viewMode === 'list' ? (
             <div className="flex flex-col h-full min-h-0 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                {/* 输入区域 */}
                 <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-xl z-10 shrink-0">
-                  
-                  {/* ✨ 新增：署名输入框 */}
                   <div className="flex items-center gap-2 mb-3 pb-3 border-b border-slate-700/50">
                     <div className="w-6 h-6 rounded-full bg-emerald-500/20 flex items-center justify-center text-emerald-500 text-xs">
                         <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
@@ -207,7 +207,6 @@ export const PrototypeDemo: React.FC = () => {
                         type="text" 
                         value={userName}
                         onChange={(e) => setUserName(e.target.value)}
-                        placeholder="请输入您的名字"
                         className="bg-slate-900 border border-slate-600 text-emerald-400 text-xs px-2 py-1 rounded focus:outline-none focus:border-emerald-500 w-32 transition-colors"
                     />
                   </div>
@@ -231,34 +230,22 @@ export const PrototypeDemo: React.FC = () => {
                   </div>
                 </div>
 
-                {/* 碰撞提醒 */}
                 {matchAlert && matchAlert.found && (
                   <div className="animate-[slideIn_0.5s_ease-out] mx-auto w-full mt-4 shrink-0">
                     <div className="bg-indigo-900/80 border border-indigo-500/50 p-4 rounded-lg shadow-2xl shadow-indigo-500/20 backdrop-blur-sm relative overflow-hidden">
-                      <div className="absolute top-0 left-0 w-1 h-full bg-indigo-500 animate-pulse"></div>
-                      <div className="flex items-start gap-4">
-                        <div className="p-3 bg-indigo-500/20 rounded-full text-indigo-300">
-                          <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                          </svg>
-                        </div>
+                      <div className="flex items-start gap-4 p-3">
+                        <div className="p-2 bg-indigo-500/20 rounded-full text-indigo-300">✨</div>
                         <div className="flex-1">
-                          <h4 className="text-indigo-100 font-bold text-lg">✨ 检测到语义共鸣！</h4>
-                          <p className="text-indigo-200/80 text-sm mt-1">{matchAlert.reason}</p>
-                          
+                          <h4 className="text-indigo-100 font-bold text-sm">检测到语义共鸣！</h4>
+                          <p className="text-indigo-200/80 text-xs mt-1">{matchAlert.reason}</p>
                           {matchAlert.targetNoteId && getMatchedNote(matchAlert.targetNoteId) && (
-                            <div className="mt-3 bg-slate-900/50 p-3 rounded border border-indigo-500/30">
-                               <p className="text-xs text-indigo-400 mb-1 font-mono">匹配到的笔记:</p>
-                               <p className="text-sm text-slate-300 italic">"{getMatchedNote(matchAlert.targetNoteId)?.content}"</p>
-                               <p className="text-xs text-slate-500 mt-2 text-right">— {getMatchedNote(matchAlert.targetNoteId)?.author}</p>
+                            <div className="mt-2 bg-slate-900/50 p-2 rounded border border-indigo-500/30">
+                               <p className="text-xs text-slate-300 italic">"{getMatchedNote(matchAlert.targetNoteId)?.content}"</p>
+                               <p className="text-[10px] text-slate-500 mt-1 text-right">— {getMatchedNote(matchAlert.targetNoteId)?.author}</p>
                             </div>
                           )}
-                          
-                          <div className="mt-3 flex gap-2">
-                            <Button variant="secondary" className="text-xs py-1 h-8" onClick={() => setMatchAlert(null)}>忽略</Button>
-                            <Button variant="primary" className="text-xs py-1 h-8 bg-indigo-600 hover:bg-indigo-500 border-none">
-                                联系作者
-                            </Button>
+                          <div className="mt-2 flex gap-2">
+                            <Button variant="secondary" className="text-[10px] py-0.5 h-6" onClick={() => setMatchAlert(null)}>忽略</Button>
                           </div>
                         </div>
                       </div>
@@ -266,11 +253,10 @@ export const PrototypeDemo: React.FC = () => {
                   </div>
                 )}
 
-                {/* 列表流 */}
                 <div className="flex-1 overflow-y-auto space-y-4 pt-4 scroll-smooth min-h-0">
-                  {localNotes.length === 0 && !matchAlert && (
+                  {localNotes.length === 0 && (
                     <div className="text-center text-slate-600 mt-10">
-                      <p>等待输入......</p>
+                      <p>暂无数据，快来抢沙发！</p>
                     </div>
                   )}
                   {localNotes.map((note, idx) => (
