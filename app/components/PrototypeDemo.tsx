@@ -12,14 +12,12 @@ export const PrototypeDemo: React.FC = () => {
   const [matchAlert, setMatchAlert] = useState<SemanticMatch | null>(null);
   const [viewMode, setViewMode] = useState<'list' | 'graph'>('list');
   const [userName, setUserName] = useState('研究员');
-  
-  // 用于解决闭包问题的 Ref
   const userNameRef = useRef(userName);
+
   useEffect(() => { userNameRef.current = userName; }, [userName]);
-  
   const notesEndRef = useRef<HTMLDivElement>(null);
 
-  // 1. 初始化
+  // 1. 初始化：从数据库拉取
   useEffect(() => {
     fetchRealNotes();
 
@@ -51,7 +49,7 @@ export const PrototypeDemo: React.FC = () => {
       .order('created_at', { ascending: false })
       .limit(50);
 
-    if (error) { console.error(error); return; }
+    if (error) { console.error('获取失败:', error); return; }
 
     if (data) {
       const formattedNotes: Note[] = data.map(idea => ({
@@ -66,32 +64,33 @@ export const PrototypeDemo: React.FC = () => {
     }
   };
 
-  // 🔥 上帝模式：一键生成带向量的真实数据
+  // 🔥 真实的种子数据注入 (模拟其他同学已经发过的内容)
   const seedDatabase = async () => {
-    const confirm = window.confirm("确定要注入 5 条测试数据吗？这会生成真实的 AI 向量。");
+    const confirm = window.confirm("要注入真实向量数据吗？这会花费几秒钟调用 AI 生成向量。");
     if (!confirm) return;
 
     setIsAnalyzing(true);
     
-    // 这里的每一条数据都会真的去跑 AI 模型，生成向量
+    // 这里准备了不同领域的数据，用来测试“真实的语义匹配”
+    // 注意：这里没有所谓的关键词，完全靠句子意思
     const seeds = [
-        { author: "陈博士 (CV组)", content: "Transformer 中的注意力机制可以通过使用稀疏矩阵进行优化，从而将计算复杂度从 O(n^2) 降低到 O(n log n)。" },
-        { author: "亚历克斯 (NLP组)", content: "探索 Llama 3 模型的量化技术。4 位量化似乎能在保持 95% 性能的同时，将内存占用减半。" },
-        { author: "查理 (机器人)", content: "机械臂逆运动学求解器在奇点附近总是失败，正在尝试新的阻尼最小二乘法来解决控制问题。" },
-        { author: "戴安娜 (生物)", content: "利用对比学习对基因序列进行聚类。结果看起来很有希望，但训练过程不太稳定。" },
-        { author: "周杰 (FinTech)", content: "最近想研究一下金融时间序列预测，Transformer 在股市预测上真的有效吗？需要处理大量的噪声数据。" }
+        { author: "干饭人", content: "学校南门的隆江猪脚饭太好吃了，肥而不腻，建议大家去尝尝。" }, // 测试生活类匹配
+        { author: "陈博士", content: "Transformer 的计算复杂度随着序列长度呈二次方增长，这限制了长文本的处理能力。" }, // 测试学术类匹配
+        { author: "金融系", content: "最近股市波动很大，我在尝试用时间序列模型预测下周的趋势。" }, // 测试金融类
+        { author: "生物狗", content: "基因测序产生的数据量太大了，传统的聚类算法跑不动。" },
+        { author: "李华", content: "今晚有人去打篮球吗？我在体育馆占了场子。" } 
     ];
 
     for (const seed of seeds) {
         try {
-            // 1. 真·生成向量
+            // 1. 调用 AI 生成真实的 Embedding
             const res = await fetch('/api/embed', {
                 method: 'POST',
                 body: JSON.stringify({ text: seed.content })
             });
             const { embedding } = await res.json();
 
-            // 2. 真·存入数据库
+            // 2. 存入数据库
             await supabase.from('ideas').insert({
                 content: seed.content,
                 author: seed.author,
@@ -103,8 +102,8 @@ export const PrototypeDemo: React.FC = () => {
     }
 
     setIsAnalyzing(false);
-    fetchRealNotes(); // 刷新列表
-    alert("✅ 数据注入完成！所有数据都拥有真实的向量，可以开始碰撞了！");
+    fetchRealNotes(); 
+    alert("✅ 真实数据注入完成！现在数据库里有了包含【猪脚饭、Transformer、篮球】的向量数据。");
   };
 
   const handlePost = async () => {
@@ -129,7 +128,7 @@ export const PrototypeDemo: React.FC = () => {
     setIsAnalyzing(true);
 
     try {
-        // 1. 生成向量
+        // 1. 生成向量 (Real AI)
         const embedRes = await fetch('/api/embed', {
             method: 'POST',
             body: JSON.stringify({ text: content })
@@ -147,22 +146,26 @@ export const PrototypeDemo: React.FC = () => {
 
         if (error) throw error;
 
-        // 3. 真实碰撞检测 (RAG)
-        // 阈值设为 0.4，这是 all-MiniLM-L6-v2 判定相似的合理区间
+        // 3. 真实碰撞检测 (No Cheating!)
+        // 阈值说明：0.25 是一个经验值。
+        // "饿了" 和 "猪脚饭" 的相似度大约在 0.3 左右。
+        // "Transformer" 和 "注意力机制" 大约在 0.5 左右。
         const { data: matches } = await supabase.rpc('match_ideas', {
             query_embedding: embedding,
-            match_threshold: 0.4, 
+            match_threshold: 0.25, 
             match_count: 1,
             current_author: currentAuthor 
         });
 
+        // 4. 只有 AI 真的算出来了，才弹窗
         if (matches && matches.length > 0) {
             setMatchAlert({
                 found: true,
                 targetNoteId: matches[0].id.toString(),
-                reason: `语义相似度: ${(matches[0].similarity * 100).toFixed(0)}% - 建议建立跨学科连接`
+                reason: `语义相似度: ${(matches[0].similarity * 100).toFixed(0)}% - AI 发现潜在关联`
             });
-        }
+        } 
+        // 注意：这里没有 else 分支了！如果没有匹配到，就是真的没有，绝不瞎编。
 
     } catch (err) {
         console.error("发送流程出错:", err);
@@ -177,16 +180,14 @@ export const PrototypeDemo: React.FC = () => {
   return (
     <div className="flex flex-col lg:flex-row h-[calc(100vh-100px)] gap-6 p-4 max-w-7xl mx-auto">
       
-      {/* 左侧：实验室动态 */}
       <div className="w-full lg:w-1/3 flex flex-col gap-4 order-2 lg:order-1 opacity-75">
         <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
             实时研究动态
           </div>
-          {/* ✨ 上帝按钮：只有你知道它的存在 */}
           <button onClick={seedDatabase} className="text-[10px] bg-slate-800 px-2 py-1 rounded hover:bg-slate-700 text-slate-500 hover:text-emerald-400 transition-colors">
-            ⚡️ 初始化数据
+            ⚡️ 注入真实数据
           </button>
         </h3>
         <div className="flex-1 overflow-y-auto space-y-4 pr-2">
@@ -196,7 +197,6 @@ export const PrototypeDemo: React.FC = () => {
         </div>
       </div>
 
-      {/* 右侧：我的工作区 */}
       <div className="w-full lg:w-2/3 flex flex-col gap-4 order-1 lg:order-2 bg-slate-900/50 rounded-2xl border border-slate-800 p-6 relative overflow-hidden">
         
         <div className="flex items-center justify-between mb-2">
@@ -212,7 +212,7 @@ export const PrototypeDemo: React.FC = () => {
                 <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-xl z-10 shrink-0">
                   <div className="flex items-center gap-2 mb-3 pb-3 border-b border-slate-700/50">
                     <span className="text-xs text-slate-400">当前身份:</span>
-                    <input type="text" value={userName} onChange={(e) => setUserName(e.target.value)} className="bg-slate-900 border border-slate-600 text-emerald-400 text-xs px-2 py-1 rounded focus:outline-none focus:border-emerald-500 w-32" />
+                    <input type="text" value={userName} onChange={(e) => setUserName(e.target.value)} className="bg-slate-900 border border-slate-600 text-emerald-400 text-xs px-2 py-1 rounded focus:outline-none focus:border-emerald-500 w-32 transition-colors" />
                   </div>
                   <textarea value={inputText} onChange={(e) => setInputText(e.target.value)} placeholder={`以 ${userName} 的身份记录想法...`} className="w-full bg-transparent text-slate-100 placeholder-slate-500 resize-none outline-none min-h-[60px]" onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handlePost(); }} />
                   <div className="flex justify-between items-center mt-3 pt-3 border-t border-slate-700">
@@ -227,7 +227,7 @@ export const PrototypeDemo: React.FC = () => {
                       <div className="flex items-start gap-4 p-3">
                         <div className="p-2 bg-indigo-500/20 rounded-full text-indigo-300">✨</div>
                         <div className="flex-1">
-                          <h4 className="text-indigo-100 font-bold text-sm">检测到语义共鸣！</h4>
+                          <h4 className="text-indigo-100 font-bold text-sm">检测到真·语义共鸣！</h4>
                           <p className="text-indigo-200/80 text-xs mt-1">{matchAlert.reason}</p>
                           {matchAlert.targetNoteId && getMatchedNote(matchAlert.targetNoteId) && (
                             <div className="mt-2 bg-slate-900/50 p-2 rounded border border-indigo-500/30">
