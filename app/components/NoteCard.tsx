@@ -1,49 +1,64 @@
 import React from 'react';
 import { Note } from '../types';
+import { Heart, MessageSquare, Hash } from 'lucide-react';
 
-export const NoteCard: React.FC<{ 
-  note: Note; 
-  isNew?: boolean;
+interface NoteCardProps {
+  note: Note;
   onDelete?: (id: string) => void;
-}> = ({ note, isNew, onDelete }) => (
-  <div className={`p-4 rounded-xl border transition-all duration-500 ${
-    isNew 
-      ? 'bg-emerald-900/20 border-emerald-500/50 shadow-[0_0_20px_rgba(16,185,129,0.1)] animate-in fade-in slide-in-from-bottom-4' 
-      : 'bg-slate-800/50 border-slate-700/50 hover:border-slate-600'
-  }`}>
-    <div className="flex justify-between items-start mb-2">
-      <div className="flex items-center gap-2">
-        <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
-          note.isLocalUser ? 'bg-emerald-500 text-white' : 'bg-blue-500 text-white'
-        }`}>
-          {note.author[0]}
+}
+
+export const NoteCard: React.FC<NoteCardProps> = ({ note, onDelete }) => {
+  return (
+    <div className="bg-white border border-gray-100 rounded-2xl shadow-md hover:shadow-lg transition-all duration-300 p-6 flex flex-col h-full">
+      {/* Header: Title & User & Time */}
+      <div className="mb-4">
+        <div className="flex items-center gap-3 mb-3">
+           <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center text-sm font-bold text-gray-600 border border-gray-200 shadow-sm">
+              {note.author[0]}
+           </div>
+           <div className="flex flex-col">
+              <span className="font-semibold text-gray-900 text-sm">{note.author}</span>
+              <span className="text-xs text-gray-400">{note.timestamp}</span>
+           </div>
         </div>
-        <span className={`text-sm font-medium ${note.isLocalUser ? 'text-emerald-400' : 'text-blue-400'}`}>
-          <span>{note.author}</span>
-        </span>
-      </div>
-      <div className="flex items-center gap-2">
-        <span className="text-xs text-slate-500"><span>{note.timestamp}</span></span>
-        {note.isLocalUser && onDelete && (
-          <button
-            onClick={() => onDelete(note.id)}
-            className="text-slate-500 hover:text-red-400 transition-colors p-1 hover:bg-red-500/10 rounded"
-            title="删除这条笔记"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
-            </svg>
-          </button>
+        
+        {note.title && (
+            <h3 className="font-bold text-gray-900 text-xl leading-tight mb-2">{note.title}</h3>
         )}
       </div>
+
+      {/* Body: Context */}
+      <div className="flex-1 mb-6 text-gray-700 text-base leading-relaxed whitespace-pre-wrap font-sans">
+        {note.content}
+      </div>
+
+      {/* Footer: Tags & Actions */}
+      <div className="flex items-center justify-between mt-auto pt-4 border-t border-gray-50">
+        {/* Tags */}
+        <div className="flex flex-wrap gap-2">
+           {note.tags && note.tags.length > 0 ? (
+               note.tags.map((tag, i) => (
+                   <span key={i} className="flex items-center text-xs text-blue-600 bg-blue-50 px-3 py-1 rounded-full font-medium">
+                       <Hash className="w-3 h-3 mr-0.5" />{tag}
+                   </span>
+               ))
+           ) : (
+               <span className="text-xs text-gray-400 italic">#idea</span>
+           )}
+        </div>
+
+        {/* Actions */}
+        <div className="flex items-center gap-4 text-gray-400">
+           <button className="flex items-center gap-1.5 hover:text-pink-500 transition-colors group p-1">
+               <Heart className="w-5 h-5 group-hover:fill-pink-500" />
+               <span className="text-sm font-medium">12</span>
+           </button>
+           <button className="flex items-center gap-1.5 hover:text-blue-500 transition-colors p-1">
+               <MessageSquare className="w-5 h-5" />
+               <span className="text-sm font-medium">3</span>
+           </button>
+        </div>
+      </div>
     </div>
-    <p className="text-slate-300 text-sm leading-relaxed mb-3 whitespace-pre-wrap"><span>{note.content}</span></p>
-    <div className="flex gap-2">
-      {note.tags.map(tag => (
-        <span key={tag} className="text-[10px] px-2 py-0.5 rounded-full bg-slate-700 text-slate-400 border border-slate-600">
-          #{tag}
-        </span>
-      ))}
-    </div>
-  </div>
-);
+  );
+};

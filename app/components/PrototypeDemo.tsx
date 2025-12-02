@@ -1,283 +1,261 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Note, SemanticMatch } from '../types';
 import { NoteCard } from '../components/NoteCard';
-import { Button } from '../components/Button';
-import { ClusterView } from './ClusterView';
+import { InputArea } from '../components/InputArea';
+import { Navbar } from '../components/Navbar';
 import { supabase } from '@/utils/supabase';
+import { Search, Plus, Users, Sparkles, X, Grid, List } from 'lucide-react';
 
 export const PrototypeDemo: React.FC = () => {
   const [localNotes, setLocalNotes] = useState<Note[]>([]);
-  const [inputText, setInputText] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [matchAlert, setMatchAlert] = useState<SemanticMatch | null>(null);
-  const [viewMode, setViewMode] = useState<'list' | 'graph'>('list');
   const [userName, setUserName] = useState('研究员');
   const userNameRef = useRef(userName);
 
   useEffect(() => { userNameRef.current = userName; }, [userName]);
-  const notesEndRef = useRef<HTMLDivElement>(null);
 
-  // 1. 初始化：从数据库拉取
+  // Fetch initial data
   useEffect(() => {
     fetchRealNotes();
-
-    const channel = supabase
-      .channel('realtime ideas')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'ideas' }, (payload) => {
-        const newIdea = payload.new;
-        if (newIdea.author !== userNameRef.current) {
-            const note: Note = {
-                id: newIdea.id.toString(),
-                author: newIdea.author || '匿名',
-                content: newIdea.content,
-                timestamp: new Date(newIdea.created_at).toLocaleTimeString(),
-                tags: ['新动态'],
-                isLocalUser: false
-            };
-            setLocalNotes(prev => [note, ...prev]);
-        }
-      })
-      .subscribe();
-
+    const channel = supabase.channel('realtime').on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'ideas' }, (payload) => {
+        if (payload.new.author !== userNameRef.current) fetchRealNotes();
+    }).subscribe();
     return () => { supabase.removeChannel(channel); }
   }, []);
 
   const fetchRealNotes = async () => {
-    const { data, error } = await supabase
-      .from('ideas')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .limit(50);
-
-    if (error) { console.error('获取失败:', error); return; }
-
-    if (data) {
-      const formattedNotes: Note[] = data.map(idea => ({
-        id: idea.id.toString(),
-        author: idea.author || '匿名',
-        content: idea.content,
-        timestamp: new Date(idea.created_at).toLocaleString(),
-        tags: ['数据库'],
-        isLocalUser: idea.author === userNameRef.current || idea.author === '我'
-      }));
-      setLocalNotes(formattedNotes);
-    }
+    const { data } = await supabase.from('ideas').select('*').order('created_at', { ascending: false }).limit(50);
+    if (data) setLocalNotes(data.map(i => ({
+        id: i.id.toString(),
+        author: i.author || '匿名',
+        title: i.title,
+        content: i.content,
+        timestamp: new Date(i.created_at).toLocaleString(),
+        tags: i.tags || [],
+        isLocalUser: i.author === userNameRef.current,
+        isPublic: i.is_public
+    })));
   };
 
-  // 🔥 真实的种子数据注入 (模拟其他同学已经发过的内容)
-  const seedDatabase = async () => {
-    const confirm = window.confirm("要注入真实向量数据吗？这会花费几秒钟调用 AI 生成向量。");
-    if (!confirm) return;
-
-    setIsAnalyzing(true);
-    
-    // 这里准备了不同领域的数据，用来测试“真实的语义匹配”
-    // 注意：这里没有所谓的关键词，完全靠句子意思
-    const seeds = [
-        { author: "干饭人", content: "学校南门的隆江猪脚饭太好吃了，肥而不腻，建议大家去尝尝。" }, // 测试生活类匹配
-        { author: "陈博士", content: "Transformer 的计算复杂度随着序列长度呈二次方增长，这限制了长文本的处理能力。" }, // 测试学术类匹配
-        { author: "金融系", content: "最近股市波动很大，我在尝试用时间序列模型预测下周的趋势。" }, // 测试金融类
-        { author: "生物狗", content: "基因测序产生的数据量太大了，传统的聚类算法跑不动。" },
-        { author: "李华", content: "今晚有人去打篮球吗？我在体育馆占了场子。" } 
-    ];
-
-    for (const seed of seeds) {
-        try {
-            // 1. 调用 AI 生成真实的 Embedding
-            const res = await fetch('/api/embed', {
-                method: 'POST',
-                body: JSON.stringify({ text: seed.content })
-            });
-            const { embedding } = await res.json();
-
-            // 2. 存入数据库
-            await supabase.from('ideas').insert({
-                content: seed.content,
-                author: seed.author,
-                embedding: embedding
-            });
-        } catch (e) {
-            console.error("注入失败", e);
-        }
-    }
-
-    setIsAnalyzing(false);
-    fetchRealNotes(); 
-    alert("✅ 真实数据注入完成！现在数据库里有了包含【猪脚饭、Transformer、篮球】的向量数据。");
-  };
-
-  const handlePost = async () => {
-    if (!inputText.trim()) return;
-    if (!userName.trim()) { alert("请先填写您的名字"); return; }
-
-    const content = inputText;
+  const handlePost = async (title: string, content: string, isPublic: boolean) => {
     const currentAuthor = userName;
+    // Optimistic UI update
+    const tempId = Date.now().toString();
+    setLocalNotes(p => [{ 
+        id: tempId, 
+        author: currentAuthor, 
+        title, 
+        content, 
+        timestamp: 'Just now', 
+        tags: [], 
+        isLocalUser: true,
+        isPublic 
+    }, ...p]);
     
-    // 乐观更新
-    const tempNote: Note = {
-      id: Date.now().toString(),
-      author: currentAuthor,
-      content: content,
-      timestamp: '发送中...',
-      tags: ['处理中'],
-      isLocalUser: true
-    };
-    setLocalNotes(prev => [tempNote, ...prev]);
-    setInputText('');
-    setMatchAlert(null); 
     setIsAnalyzing(true);
+    setMatchAlert(null);
 
     try {
-        // 1. 生成向量 (Real AI)
-        const embedRes = await fetch('/api/embed', {
-            method: 'POST',
-            body: JSON.stringify({ text: content })
+        // 1. Generate Embedding
+        const res = await fetch('/api/embed', { method: 'POST', body: JSON.stringify({ text: content }) });
+        const { embedding } = await res.json();
+        
+        // 2. Insert into DB
+        await supabase.from('ideas').insert({ 
+            content, 
+            title: title || null,
+            author: currentAuthor, 
+            embedding,
+            is_public: isPublic,
+            tags: [] // Default empty tags for now
         });
         
-        if (!embedRes.ok) throw new Error("向量生成失败");
-        const { embedding } = await embedRes.json();
-
-        // 2. 存入数据库
-        const { error } = await supabase.from('ideas').insert({
-            content: content,
-            author: currentAuthor, 
-            embedding: embedding
-        });
-
-        if (error) throw error;
-
-        // 3. 真实碰撞检测 (No Cheating!)
-        // 阈值说明：0.25 是一个经验值。
-        // "饿了" 和 "猪脚饭" 的相似度大约在 0.3 左右。
-        // "Transformer" 和 "注意力机制" 大约在 0.5 左右。
-        const { data: matches } = await supabase.rpc('match_ideas', {
-            query_embedding: embedding,
+        // 3. RAG Matching
+        const { data: matches } = await supabase.rpc('match_ideas', { 
+            query_embedding: embedding, 
             match_threshold: 0.25, 
-            match_count: 1,
+            match_count: 1, 
             current_author: currentAuthor 
         });
 
-        // 4. 只有 AI 真的算出来了，才弹窗
-        if (matches && matches.length > 0) {
-            setMatchAlert({
-                found: true,
-                targetNoteId: matches[0].id.toString(),
-                reason: `语义相似度: ${(matches[0].similarity * 100).toFixed(0)}% - AI 发现潜在关联`
+        if (matches?.length) {
+            setMatchAlert({ 
+                found: true, 
+                targetNoteId: matches[0].id.toString(), 
+                reason: `Found similar idea from ${matches[0].author}` 
             });
-        } 
-        // 注意：这里没有 else 分支了！如果没有匹配到，就是真的没有，绝不瞎编。
-
-    } catch (err) {
-        console.error("发送流程出错:", err);
-    } finally {
-        setIsAnalyzing(false);
-        fetchRealNotes(); 
+        }
+    } catch (e) { 
+        console.error(e); 
+        // Rollback logic could go here
+    } finally { 
+        setIsAnalyzing(false); 
+        fetchRealNotes(); // Refresh to get real ID
     }
   };
 
+  const getMatchedNote = (id?: string) => localNotes.find(n => n.id === id);
 
-const getMatchedNote = (id?: string) => localNotes.find(n => n.id === id);
-// 删除笔记处理函数
-const handleDelete = async (id: string) => {
-  if (!window.confirm('确定要删除这条笔记吗？')) return;
-  // 1. 乐观更新：立即从UI移除
-  const noteToDelete = localNotes.find(n => n.id === id);
-  setLocalNotes(prev => prev.filter(n => n.id !== id));
-  try {
-    // 2. 调用 Supabase 删除
-    const { error } = await supabase
-      .from('ideas')
-      .delete()
-      .eq('id', id);
-    if (error) throw error;
-    console.log('✅ 笔记已删除:', id);
-  } catch (err) {
-    console.error('删除失败:', err);
-    alert('删除失败，请重试');
-    
-    // 3. 删除失败时回滚状态
-    if (noteToDelete) {
-      setLocalNotes(prev => [noteToDelete, ...prev]);
-    }
-  }
-};
   return (
-    <div className="flex flex-col lg:flex-row h-[calc(100vh-100px)] gap-6 p-4 max-w-7xl mx-auto">
-      
-      <div className="w-full lg:w-1/3 flex flex-col gap-4 order-2 lg:order-1 opacity-75">
-        <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-            实时研究动态
-          </div>
-          <button onClick={seedDatabase} className="text-[10px] bg-slate-800 px-2 py-1 rounded hover:bg-slate-700 text-slate-500 hover:text-emerald-400 transition-colors">
-            ⚡️ 注入真实数据
-          </button>
-        </h3>
-        <div className="flex-1 overflow-y-auto space-y-4 pr-2">
-          {localNotes.map(note => (
-            <NoteCard key={note.id} note={note} onDelete={handleDelete} />
-          ))}
-        </div>
-      </div>
-
-      <div className="w-full lg:w-2/3 flex flex-col gap-4 order-1 lg:order-2 bg-slate-900/50 rounded-2xl border border-slate-800 p-6 relative overflow-hidden">
-        
-        <div className="flex items-center justify-between mb-2">
-            <h2 className="text-xl font-bold text-white">人工智能语义分析</h2>
-            <div className="flex bg-slate-800 rounded-lg p-1 border border-slate-700">
-                <button onClick={() => setViewMode('list')} className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${viewMode === 'list' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}>💬 列表视图</button>
-                <button onClick={() => setViewMode('graph')} className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${viewMode === 'graph' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}>🌌 聚类星图</button>
-            </div>
-        </div>
-        
-        {viewMode === 'list' ? (
-            <div className="flex flex-col h-full min-h-0 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-xl z-10 shrink-0">
-                  <div className="flex items-center gap-2 mb-3 pb-3 border-b border-slate-700/50">
-                    <span className="text-xs text-slate-400">当前身份:</span>
-                    <input type="text" value={userName} onChange={(e) => setUserName(e.target.value)} className="bg-slate-900 border border-slate-600 text-emerald-400 text-xs px-2 py-1 rounded focus:outline-none focus:border-emerald-500 w-32 transition-colors" />
-                  </div>
-                  <textarea value={inputText} onChange={(e) => setInputText(e.target.value)} placeholder={`以 ${userName} 的身份记录想法...`} className="w-full bg-transparent text-slate-100 placeholder-slate-500 resize-none outline-none min-h-[60px]" onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handlePost(); }} />
-                  <div className="flex justify-between items-center mt-3 pt-3 border-t border-slate-700">
-                    <span className="text-xs text-slate-500 hidden sm:block">Cmd/Ctrl + Enter 发送</span>
-                    <Button onClick={handlePost} isLoading={isAnalyzing} disabled={!inputText.trim()}>便签入库</Button>
-                  </div>
-                </div>
-
-                {matchAlert && matchAlert.found && (
-                  <div className="animate-[slideIn_0.5s_ease-out] mx-auto w-full mt-4 shrink-0">
-                    <div className="bg-indigo-900/80 border border-indigo-500/50 p-4 rounded-lg shadow-2xl shadow-indigo-500/20 backdrop-blur-sm relative overflow-hidden">
-                      <div className="flex items-start gap-4 p-3">
-                        <div className="p-2 bg-indigo-500/20 rounded-full text-indigo-300">✨</div>
-                        <div className="flex-1">
-                          <h4 className="text-indigo-100 font-bold text-sm">检测到真·语义共鸣！</h4>
-                          <p className="text-indigo-200/80 text-xs mt-1">{matchAlert.reason}</p>
-                          {matchAlert.targetNoteId && getMatchedNote(matchAlert.targetNoteId) && (
-                            <div className="mt-2 bg-slate-900/50 p-2 rounded border border-indigo-500/30">
-                               <p className="text-xs text-slate-300 italic">"{getMatchedNote(matchAlert.targetNoteId)?.content}"</p>
-                               <p className="text-[10px] text-slate-500 mt-1 text-right">— {getMatchedNote(matchAlert.targetNoteId)?.author}</p>
-                            </div>
-                          )}
-                          <div className="mt-2 flex gap-2">
-                            <Button variant="secondary" className="text-[10px] py-0.5 h-6" onClick={() => setMatchAlert(null)}>忽略</Button>
-                          </div>
+    <div className="min-h-screen bg-[#FAFAFA] text-[#1A1A1B] font-sans">
+      {/* Spark Alert Modal */}
+      {matchAlert && matchAlert.found && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm animate-in fade-in">
+            <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-lg w-full border border-purple-100 transform transition-all scale-100">
+                <div className="flex justify-between items-start mb-6">
+                    <div className="flex items-center gap-3 text-purple-600">
+                        <div className="p-2 bg-purple-100 rounded-full">
+                            <Sparkles className="w-6 h-6 fill-purple-600" />
                         </div>
-                      </div>
+                        <h3 className="text-2xl font-bold">Spark Alert!</h3>
                     </div>
-                  </div>
+                    <button onClick={() => setMatchAlert(null)} className="text-gray-400 hover:text-gray-600 p-1 hover:bg-gray-100 rounded-full transition-colors">
+                        <X className="w-6 h-6" />
+                    </button>
+                </div>
+                
+                <p className="text-gray-600 text-lg mb-6 leading-relaxed">
+                    {matchAlert.reason}
+                </p>
+
+                {matchAlert.targetNoteId && getMatchedNote(matchAlert.targetNoteId) && (
+                    <div className="bg-gradient-to-br from-purple-50 to-white p-6 rounded-xl border border-purple-100 mb-8 shadow-sm">
+                        <div className="flex items-center gap-2 mb-3">
+                            <div className="w-6 h-6 rounded-full bg-purple-200 flex items-center justify-center text-xs font-bold text-purple-700">
+                                {getMatchedNote(matchAlert.targetNoteId)?.author[0]}
+                            </div>
+                            <div className="text-sm font-bold text-purple-900">
+                                u/{getMatchedNote(matchAlert.targetNoteId)?.author}
+                            </div>
+                        </div>
+                        <div className="text-base text-gray-800 italic leading-relaxed">
+                            "{getMatchedNote(matchAlert.targetNoteId)?.content}"
+                        </div>
+                    </div>
                 )}
 
-                <div className="flex-1 overflow-y-auto space-y-4 pt-4 scroll-smooth min-h-0">
-                  {localNotes.map((note, idx) => (<NoteCard key={note.id} note={note} isNew={idx === 0} onDelete={handleDelete} />))}
-                  <div ref={notesEndRef} />
+                <div className="flex gap-4">
+                    <button onClick={() => setMatchAlert(null)} className="flex-1 py-3 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-full transition-colors shadow-lg hover:shadow-purple-200">
+                        Connect & Discuss
+                    </button>
+                    <button onClick={() => setMatchAlert(null)} className="px-6 py-3 text-gray-500 font-bold hover:bg-gray-100 rounded-full transition-colors">
+                        Dismiss
+                    </button>
                 </div>
             </div>
-        ) : (
-            <div className="flex-1 flex flex-col min-h-0 animate-in fade-in zoom-in-95 duration-500">
-                <div className="flex-1 relative rounded-xl overflow-hidden border border-slate-700/50 bg-slate-950/30"><ClusterView /></div>
+        </div>
+      )}
+
+      {/* Main Layout: Asymmetric 3-Column */}
+      <div className="flex h-screen overflow-hidden">
+        
+        {/* Left Sidebar (w-1/5, min-260px) */}
+        <div className="w-1/5 min-w-[260px] bg-gray-50/50 border-r border-gray-200 flex flex-col flex-shrink-0">
+            <div className="h-[80px] flex items-center px-8">
+                <h1 className="font-serif text-2xl font-bold text-gray-900 tracking-tight">Swift Ideas</h1>
             </div>
-        )}
+            
+            <div className="flex-1 overflow-y-auto px-6 py-4 space-y-8">
+                {/* Navigation */}
+                <div className="space-y-4">
+                    <button className="w-full flex items-center gap-4 px-4 py-3 text-lg font-medium text-gray-900 bg-white border border-gray-200 shadow-sm rounded-xl hover:shadow-md transition-all">
+                        <Sparkles className="w-5 h-5 text-purple-600" />
+                        Popular Ideas
+                    </button>
+                    <button className="w-full flex items-center gap-4 px-4 py-3 text-lg font-medium text-gray-600 hover:bg-white hover:shadow-sm rounded-xl transition-all">
+                        <Users className="w-5 h-5" />
+                        My Groups
+                    </button>
+                </div>
+
+                {/* Groups List */}
+                <div>
+                    <div className="flex items-center justify-between mb-4 px-2">
+                        <span className="text-sm font-bold text-gray-400 uppercase tracking-wider">My Groups</span>
+                        <button className="text-gray-400 hover:text-gray-600 p-1 hover:bg-gray-200 rounded"><Plus className="w-4 h-4" /></button>
+                    </div>
+                    <div className="space-y-2">
+                        {['Product Design', 'Engineering', 'Marketing', 'Random'].map((group, i) => (
+                            <button key={i} className="w-full flex items-center gap-3 px-4 py-3 text-base text-gray-600 hover:bg-white hover:shadow-sm rounded-xl transition-all group">
+                                <span className="w-3 h-3 rounded-full bg-gray-300 group-hover:bg-purple-400 transition-colors"></span>
+                                {group}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+
+                <div className="pt-4">
+                    <button className="w-full py-3 bg-gray-900 text-white font-bold rounded-xl shadow-lg hover:bg-black hover:shadow-xl transition-all transform hover:-translate-y-0.5">
+                        + Create Group
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        {/* Main Feed (Flexible, Grid) */}
+        <div className="flex-1 bg-[#FAFAFA] overflow-y-auto relative scrollbar-hide">
+            <div className="w-full h-full p-8">
+                <div className="mb-8 flex items-end justify-between">
+                    <div>
+                        <h2 className="text-3xl font-bold text-gray-900 mb-2">Fresh Ideas</h2>
+                        <p className="text-lg text-gray-500">See what your team is thinking about today.</p>
+                    </div>
+                    <div className="flex gap-2 bg-white p-1 rounded-lg border border-gray-200 shadow-sm">
+                        <button className="p-2 bg-gray-100 rounded text-gray-900"><Grid className="w-5 h-5" /></button>
+                        <button className="p-2 text-gray-400 hover:bg-gray-50 rounded"><List className="w-5 h-5" /></button>
+                    </div>
+                </div>
+
+                {/* Grid Layout */}
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 pb-32">
+                    {localNotes.map((note) => (
+                        <div key={note.id} className="h-full">
+                            <NoteCard note={note} />
+                        </div>
+                    ))}
+                </div>
+            </div>
+        </div>
+
+        {/* Right Panel (w-1/4, min-320px) */}
+        <div className="w-1/4 min-w-[320px] bg-white border-l border-gray-200 flex flex-col flex-shrink-0 relative z-10">
+            {/* Top: Search */}
+            <div className="h-[80px] border-b border-gray-100 flex items-center px-6">
+                <div className="relative w-full">
+                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                    <input 
+                        type="text" 
+                        placeholder="Search ideas..." 
+                        className="w-full h-12 bg-gray-50 border border-transparent focus:bg-white focus:border-purple-200 focus:shadow-md rounded-2xl pl-12 pr-4 text-base outline-none transition-all"
+                    />
+                </div>
+            </div>
+
+            {/* Middle: Widgets */}
+            <div className="flex-1 p-6 overflow-y-auto">
+                <div className="bg-gradient-to-br from-purple-50 to-blue-50 rounded-2xl p-6 mb-6 border border-purple-100 shadow-sm">
+                    <h3 className="font-bold text-purple-900 text-lg mb-2">Weekly Challenge</h3>
+                    <p className="text-base text-purple-800 mb-4 leading-relaxed">How might we improve the onboarding experience for new users?</p>
+                    <div className="flex -space-x-3">
+                        {[1,2,3,4].map(i => (
+                            <div key={i} className="w-10 h-10 rounded-full bg-white border-2 border-purple-100 flex items-center justify-center text-sm font-bold text-purple-600 shadow-sm">
+                                {String.fromCharCode(64+i)}
+                            </div>
+                        ))}
+                        <div className="w-10 h-10 rounded-full bg-purple-200 border-2 border-purple-100 flex items-center justify-center text-sm font-bold text-purple-600 shadow-sm">
+                            +5
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* Bottom: Input Area (Fixed) */}
+            <div className="border-t border-gray-200 bg-white">
+                <InputArea onPost={handlePost} isAnalyzing={isAnalyzing} />
+            </div>
+        </div>
+
       </div>
     </div>
   );
