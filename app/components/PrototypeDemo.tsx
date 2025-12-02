@@ -175,8 +175,32 @@ export const PrototypeDemo: React.FC = () => {
     }
   };
 
-  const getMatchedNote = (id?: string) => localNotes.find(n => n.id === id);
 
+const getMatchedNote = (id?: string) => localNotes.find(n => n.id === id);
+// 删除笔记处理函数
+const handleDelete = async (id: string) => {
+  if (!window.confirm('确定要删除这条笔记吗？')) return;
+  // 1. 乐观更新：立即从UI移除
+  const noteToDelete = localNotes.find(n => n.id === id);
+  setLocalNotes(prev => prev.filter(n => n.id !== id));
+  try {
+    // 2. 调用 Supabase 删除
+    const { error } = await supabase
+      .from('ideas')
+      .delete()
+      .eq('id', id);
+    if (error) throw error;
+    console.log('✅ 笔记已删除:', id);
+  } catch (err) {
+    console.error('删除失败:', err);
+    alert('删除失败，请重试');
+    
+    // 3. 删除失败时回滚状态
+    if (noteToDelete) {
+      setLocalNotes(prev => [noteToDelete, ...prev]);
+    }
+  }
+};
   return (
     <div className="flex flex-col lg:flex-row h-[calc(100vh-100px)] gap-6 p-4 max-w-7xl mx-auto">
       
@@ -192,7 +216,7 @@ export const PrototypeDemo: React.FC = () => {
         </h3>
         <div className="flex-1 overflow-y-auto space-y-4 pr-2">
           {localNotes.map(note => (
-            <NoteCard key={note.id} note={note} />
+            <NoteCard key={note.id} note={note} onDelete={handleDelete} />
           ))}
         </div>
       </div>
@@ -245,7 +269,7 @@ export const PrototypeDemo: React.FC = () => {
                 )}
 
                 <div className="flex-1 overflow-y-auto space-y-4 pt-4 scroll-smooth min-h-0">
-                  {localNotes.map((note, idx) => (<NoteCard key={note.id} note={note} isNew={idx === 0} />))}
+                  {localNotes.map((note, idx) => (<NoteCard key={note.id} note={note} isNew={idx === 0} onDelete={handleDelete} />))}
                   <div ref={notesEndRef} />
                 </div>
             </div>
