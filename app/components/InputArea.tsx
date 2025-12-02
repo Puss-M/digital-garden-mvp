@@ -19,35 +19,35 @@ export const InputArea: React.FC<InputAreaProps> = ({ onPost, isAnalyzing }) => 
   };
 
   return (
-    <div className="bg-white border-t border-gray-200 p-6 shadow-[0_-4px_20px_-5px_rgba(0,0,0,0.1)]">
-      <div className="flex flex-col gap-4">
+    <div className="bg-white p-8 flex flex-col h-full">
+      <div className="flex flex-col gap-8 flex-1">
         {/* Title Input (Optional) */}
         <input
           type="text"
-          placeholder="Idea Title (Optional)..."
-          className="w-full text-base font-bold text-gray-900 placeholder-gray-400 outline-none bg-transparent px-1"
+          placeholder="Idea Title..."
+          className="w-full text-3xl font-bold text-gray-900 placeholder-gray-300 outline-none bg-transparent border-b border-gray-100 pb-4 focus:border-gray-300 transition-colors"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
         />
         
-        {/* Main Content Textarea */}
+        {/* Main Content Textarea - Massive & Borderless */}
         <textarea
           placeholder="Write down your ideas..."
-          className="w-full min-h-[120px] text-lg text-gray-800 placeholder-gray-400 outline-none resize-none bg-transparent px-1 leading-relaxed"
+          className="w-full flex-1 min-h-[256px] text-2xl text-gray-900 placeholder-gray-300 outline-none resize-none bg-transparent leading-relaxed focus:ring-0"
           value={content}
           onChange={(e) => setContent(e.target.value)}
         />
 
         {/* Footer: Controls */}
-        <div className="flex items-center justify-between pt-2">
+        <div className="flex items-center justify-between pt-6 mt-auto">
           {/* Privacy Toggle */}
           <button 
             onClick={() => setIsPublic(!isPublic)}
-            className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-colors ${
-                isPublic ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'
+            className={`flex items-center gap-3 px-6 py-4 rounded-xl text-lg font-medium transition-colors ${
+                isPublic ? 'bg-green-50 text-green-700' : 'bg-gray-50 text-gray-700'
             }`}
           >
-            {isPublic ? <Globe className="w-4 h-4" /> : <Lock className="w-4 h-4" />}
+            {isPublic ? <Globe className="w-6 h-6" /> : <Lock className="w-6 h-6" />}
             {isPublic ? 'Public' : 'Private'}
           </button>
 
@@ -55,17 +55,17 @@ export const InputArea: React.FC<InputAreaProps> = ({ onPost, isAnalyzing }) => 
           <button
             onClick={handleSubmit}
             disabled={!content.trim() || isAnalyzing}
-            className="flex items-center gap-2 px-6 py-3 bg-black text-white rounded-full text-base font-bold hover:bg-gray-800 disabled:bg-gray-300 disabled:cursor-not-allowed transition-all shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 active:translate-y-0"
+            className="flex items-center gap-4 px-10 h-16 bg-black text-white rounded-xl text-2xl font-bold hover:bg-gray-800 disabled:bg-gray-300 disabled:cursor-not-allowed transition-all shadow-md hover:scale-[1.02] active:scale-100"
           >
             {isAnalyzing ? (
                 <>
-                    <Sparkles className="w-5 h-5 animate-spin" />
+                    <Sparkles className="w-7 h-7 animate-spin" />
                     <span>Matching...</span>
                 </>
             ) : (
                 <>
                     <span>Save Idea</span>
-                    <Send className="w-5 h-5" />
+                    <Send className="w-7 h-7" />
                 </>
             )}
           </button>

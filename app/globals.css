@@ -3,18 +3,16 @@
 @tailwind utilities;
 
 :root {
-  background-color: #DAE0E6;
-  color: #1A1A1B;
+  background-color: #ffffff;
+  color: #111827; 
 }
 
 body {
-  background-color: #DAE0E6;
-  color: #1A1A1B;
-  /* Reddit uses sans-serif primarily */
-  font-family: "IBM Plex Sans", Arial, sans-serif; 
+  background-color: #ffffff;
+  color: #111827;
+  font-family: Arial, Helvetica, sans-serif;
 }
 
-/* Scrollbar styling for a cleaner look */
 ::-webkit-scrollbar {
   width: 8px;
 }
@@ -22,9 +20,9 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #CCCCCC;
+  background: #cbd5e1;
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #999999;
+  background: #94a3b8;
 }
